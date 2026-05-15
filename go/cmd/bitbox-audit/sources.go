@@ -8,7 +8,10 @@ import (
 )
 
 // sourceExtensions are scanned by default. Add more as new wallet stacks emerge.
-var sourceExtensions = []string{".go", ".ts", ".tsx", ".js", ".jsx"}
+// Note: detection patterns are currently Go/TS/JS-shaped. Other languages
+// (Dart, Kotlin, Swift) are scanned but only quirks whose patterns also
+// match those syntaxes fire (typically string-content quirks like E1).
+var sourceExtensions = []string{".go", ".ts", ".tsx", ".js", ".jsx", ".dart"}
 
 // skipDirs prevents scanning into vendored / generated / heavy paths.
 var skipDirs = map[string]bool{
