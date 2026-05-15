@@ -143,6 +143,50 @@ The sticky comment shows:
 
 ---
 
+## Test naming convention (important)
+
+For the audit-runner to pick up your dynamic test coverage, every test that exercises a quirk **must mention the quirk ID** somewhere in its `describe` or `it` chain. The audit-runner pattern-matches against the test's full name. The matcher is permissive but specific:
+
+### Patterns that work
+
+```ts
+describe('quirk E1 (non-ASCII EIP-712)', () => {
+  it('rejects umlauts', ...);
+});
+// → covers E1
+
+it('quirk A1 — bridge throws synchronously', ...);
+// → covers A1
+
+it('Quirk E10: unknown chain ID', ...);          // case-insensitive after "Quirk"
+// → covers E10
+
+it('TestQuirkE1Umlaut', ...);                    // camelCase
+// → covers E1
+
+it('handles E10 unknown chain', ...);            // standalone, with whitespace boundaries
+// → covers E10
+```
+
+### Patterns that don't work
+
+```ts
+it('rejects umlaut bytes', ...);                 // no quirk ID anywhere
+it('handles invalid input', ...);                // ambiguous
+it('E1', ...);                                   // too short — needs a separator after
+it('quirkE-1', ...);                             // dash inside the ID
+```
+
+### Verify locally before pushing
+
+Run `bitbox-audit --test-results <jest-output>` against your test file. The `Runtime tests passing` bucket lists every quirk ID the audit linked. If a test you intended to cover quirk X3 doesn't show up there, the name doesn't match — rename it.
+
+### Why this exists
+
+The audit-runner has no other way to know that `it('handles bad input')` was meant to cover quirk E2 versus E3 versus B7. The quirk ID in the test name is the explicit link. We considered tagging via JSDoc or magic comments; in-test-name is the simplest convention that survives test runners, IDE refactors, and CI parsers.
+
+---
+
 ## When the audit flags something
 
 For each finding, the comment includes:

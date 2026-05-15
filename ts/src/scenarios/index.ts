@@ -105,6 +105,35 @@ export function scenarioSlowResponse(delayMs = 15_000, payload: unknown = undefi
 }
 
 /**
+ * Quirk E10: firmware on older versions doesn't recognise newer chain IDs.
+ * Calls whose first argument is a chain ID in `unknownChainIds` reject with
+ * ErrInvalidInput101; calls on other chains succeed. Use the
+ * `bigintChainIds` flag if your bitbox-api wrapper uses bigint chain IDs.
+ */
+export function scenarioUnknownNetwork(unknownChainIds: readonly (number | bigint)[] = [999, 146]): FakeSetup {
+  const numSet = new Set<number>();
+  const bigSet = new Set<bigint>();
+  for (const id of unknownChainIds) {
+    if (typeof id === 'bigint') bigSet.add(id);
+    else numSet.add(id);
+  }
+  const handler: Handler = async (...args) => {
+    const head = args[0];
+    if (typeof head === 'number' && numSet.has(head)) {
+      return Promise.reject(ErrInvalidInput101);
+    }
+    if (typeof head === 'bigint' && bigSet.has(head)) {
+      return Promise.reject(ErrInvalidInput101);
+    }
+    return undefined;
+  };
+  return {
+    description: `rejects calls whose first arg is one of ${[...numSet, ...bigSet].join(',')}`,
+    methods: methodCatchAll(handler),
+  };
+}
+
+/**
  * Pairing race scenario: the first n calls succeed (channel hash available),
  * subsequent calls reject with AwaitingUserConfirmError until
  * `signalConfirm()` is invoked.
