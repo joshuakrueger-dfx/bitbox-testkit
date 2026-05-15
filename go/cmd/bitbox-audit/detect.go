@@ -70,12 +70,64 @@ func applyRule(cache *regexCache, q quirks.Quirk, rule quirks.DetectRule, files 
 		return applyRegexInContext(cache, q, rule, files, root)
 	case "ordered_pair":
 		return applyOrderedPair(cache, q, rule, files, root)
+	case "missing_pair_within":
+		return applyMissingPairWithin(cache, q, rule, files, root)
 	default:
 		// Unknown kind — silently skip rather than crash the audit. A
 		// future schema bump can introduce new kinds while older audit
 		// binaries keep running.
 		return nil
 	}
+}
+
+// applyMissingPairWithin flags every Regex match that does NOT have a
+// PairRegex match within the following WithinLines lines. Used for
+// "every X must be paired with Y nearby" rules (e.g. //export with
+// defer recoverPanic).
+func applyMissingPairWithin(cache *regexCache, q quirks.Quirk, rule quirks.DetectRule, files []string, root string) []Finding {
+	primary, err := cache.get(rule.Regex)
+	if err != nil {
+		return nil
+	}
+	pair, err := cache.get(rule.PairRegex)
+	if err != nil {
+		return nil
+	}
+	window := rule.WithinLines
+	if window <= 0 {
+		window = 5
+	}
+	var out []Finding
+	for _, path := range files {
+		if !matchesGlobs(path, rule.FileGlobs) {
+			continue
+		}
+		content, err := os.ReadFile(path)
+		if err != nil {
+			continue
+		}
+		lines := strings.Split(string(content), "\n")
+		for i, line := range lines {
+			if !primary.MatchString(line) {
+				continue
+			}
+			end := i + 1 + window
+			if end > len(lines) {
+				end = len(lines)
+			}
+			paired := false
+			for _, follower := range lines[i+1 : end] {
+				if pair.MatchString(follower) {
+					paired = true
+					break
+				}
+			}
+			if !paired {
+				out = append(out, makeFinding(q, rule, path, root, i+1, line))
+			}
+		}
+	}
+	return out
 }
 
 func applyRegex(cache *regexCache, q quirks.Quirk, rule quirks.DetectRule, files []string, root string) []Finding {

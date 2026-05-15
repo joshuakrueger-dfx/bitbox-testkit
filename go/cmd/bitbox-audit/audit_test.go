@@ -95,15 +95,76 @@ func process(id string) {
 
 func TestScanFlagsA2HardcodedTimeoutsAcrossLanguages(t *testing.T) {
 	dir := t.TempDir()
-	writeFile(t, dir, "go-side.go", `package transport
+	// File path "transport" supplies the context filter ("transport"
+	// matches the context_regex). The regex_in_context detection only
+	// fires when both the context filter and the line regex hit, which
+	// keeps the rule from flagging unrelated setTimeout calls in app
+	// code (e.g. animation delays).
+	writeFile(t, dir, "bitbox-transport.go", `package transport
+// BitBox transport layer
 import "time"
 func wait() { time.Sleep(10 * time.Second) }
 `)
-	writeFile(t, dir, "ts-side.ts", `setTimeout(cb, 10000);`)
+	writeFile(t, dir, "bitbox-connect.ts", `// BitBox BLE transport
+setTimeout(cb, 10000);
+`)
 	files, _ := enumerateSources(dir)
 	got := scan(dir, files, []quirks.Quirk{quirkByID(t, "A2")})
 	if len(got) < 2 {
-		t.Fatalf("expected ≥ 2 A2 findings (Go + TS), got %d", len(got))
+		t.Fatalf("expected ≥ 2 A2 findings (Go + TS in BitBox transport context), got %d: %+v", len(got), got)
+	}
+}
+
+func TestScanA2IgnoresUnrelatedTimeouts(t *testing.T) {
+	// 10s timeouts in non-transport contexts (animation, debounce) should
+	// not trigger the audit. This is the false-positive guard.
+	dir := t.TempDir()
+	writeFile(t, dir, "animation.ts", `setTimeout(fade, 10000);  // fade-out delay`)
+	writeFile(t, dir, "debounce.go", `package ui
+func wait() { time.Sleep(10 * time.Second) }
+`)
+	files, _ := enumerateSources(dir)
+	got := scan(dir, files, []quirks.Quirk{quirkByID(t, "A2")})
+	if len(got) != 0 {
+		t.Fatalf("expected 0 A2 findings in unrelated context, got %d: %+v", len(got), got)
+	}
+}
+
+func TestScanFlagsE7AddressCaseOutOfRange(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, dir, "bad.ts", `const req = { addressCase: 3 };`)
+	writeFile(t, dir, "ok.ts", `const req = { addressCase: 2 };`)
+	files, _ := enumerateSources(dir)
+	got := scan(dir, files, []quirks.Quirk{quirkByID(t, "E7")})
+	if len(got) != 1 {
+		t.Fatalf("expected 1 E7 finding (only the addressCase: 3 line), got %d: %+v", len(got), got)
+	}
+}
+
+func TestScanFlagsB1LocktimeOverflow(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, dir, "bad.ts", `const tx = { locktime: 1700000000 };`)         // 2023-11 timestamp
+	writeFile(t, dir, "ok.ts", `const tx = { locktime: 800000 };`)               // block height
+	files, _ := enumerateSources(dir)
+	got := scan(dir, files, []quirks.Quirk{quirkByID(t, "B1")})
+	if len(got) != 1 {
+		t.Fatalf("expected 1 B1 finding (only the timestamp-style line), got %d: %+v", len(got), got)
+	}
+}
+
+func TestScanFlagsA1GomobileExportWithoutContext(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, dir, "exports.go", `package main
+// gomobile binding entry-point file.
+//export DoThing
+func DoThing() string {
+    return "result"
+}
+`)
+	files, _ := enumerateSources(dir)
+	got := scan(dir, files, []quirks.Quirk{quirkByID(t, "A1")})
+	if len(got) != 1 {
+		t.Fatalf("expected 1 A1 finding for the //export comment, got %d: %+v", len(got), got)
 	}
 }
 

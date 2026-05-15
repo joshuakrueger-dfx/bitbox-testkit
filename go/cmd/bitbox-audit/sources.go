@@ -2,6 +2,7 @@ package main
 
 import (
 	"io/fs"
+	"os"
 	"path/filepath"
 	"strings"
 )
@@ -66,6 +67,9 @@ func enumerateSources(root string) ([]string, error) {
 		if isTestFile(path) {
 			return nil
 		}
+		if hasAuditSkipMarker(path) {
+			return nil
+		}
 		out = append(out, path)
 		return nil
 	})
@@ -73,6 +77,39 @@ func enumerateSources(root string) ([]string, error) {
 		return nil, err
 	}
 	return out, nil
+}
+
+// hasAuditSkipMarker returns true if the file's first ~10 lines contain an
+// "audit-skip-file" comment. Used to silence fixtures and pattern-doc files
+// that intentionally contain the strings the audit looks for.
+func hasAuditSkipMarker(path string) bool {
+	f, err := os.Open(path)
+	if err != nil {
+		return false
+	}
+	defer f.Close()
+	buf := make([]byte, 4096)
+	n, _ := f.Read(buf)
+	head := string(buf[:n])
+	// Restrict the check to the first 10 lines so a comment buried deep
+	// in source can't accidentally suppress everything.
+	if eol := nthLineBreak(head, 10); eol > 0 {
+		head = head[:eol]
+	}
+	return strings.Contains(head, "audit-skip-file")
+}
+
+func nthLineBreak(s string, n int) int {
+	count := 0
+	for i, c := range s {
+		if c == '\n' {
+			count++
+			if count == n {
+				return i
+			}
+		}
+	}
+	return -1
 }
 
 func hasSourceExtension(path string) bool {

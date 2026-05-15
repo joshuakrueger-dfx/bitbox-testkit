@@ -97,17 +97,24 @@ func (r FirmwareRange) String() string {
 //
 // Kind decodes how the other fields are used:
 //
-//	"regex"             — line-level match against Regex. FileGlobs limits files.
-//	"regex_in_context"  — two-pass: file must contain ContextRegex first,
-//	                      then per-line Regex flags occurrences.
-//	"ordered_pair"      — file must contain both BeforeRegex and AfterRegex;
-//	                      violation = AfterRegex appears before BeforeRegex.
+//	"regex"               — line-level match against Regex. FileGlobs limits files.
+//	"regex_in_context"    — two-pass: file must contain ContextRegex first,
+//	                        then per-line Regex flags occurrences.
+//	"ordered_pair"        — file must contain both BeforeRegex and AfterRegex;
+//	                        violation = AfterRegex appears before BeforeRegex.
+//	"missing_pair_within" — for each Regex match, look at the next
+//	                        WithinLines lines for a PairRegex match. If
+//	                        none, flag the original. Used for "every //export
+//	                        must be followed by defer recoverPanic within
+//	                        a few lines" rules.
 type DetectRule struct {
 	Kind         string   `json:"kind"`
 	Regex        string   `json:"regex,omitempty"`
 	ContextRegex string   `json:"context_regex,omitempty"`
 	BeforeRegex  string   `json:"before_regex,omitempty"`
 	AfterRegex   string   `json:"after_regex,omitempty"`
+	PairRegex    string   `json:"pair_regex,omitempty"`
+	WithinLines  int      `json:"within_lines,omitempty"`
 	FileGlobs    []string `json:"file_globs,omitempty"`
 	Reason       string   `json:"reason"`
 	FixHint      string   `json:"fix_hint,omitempty"`

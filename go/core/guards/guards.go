@@ -1,3 +1,5 @@
+// audit-skip-file: documents the patterns the audit-runner looks for.
+
 // Package guards provides source-level regression checks. Consumers run
 // these from their own test suite to prevent a known bug class from
 // silently coming back through a refactor.

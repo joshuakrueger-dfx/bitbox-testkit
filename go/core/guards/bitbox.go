@@ -1,3 +1,5 @@
+// audit-skip-file: this file documents the patterns the audit-runner looks
+// for. Without this marker it would self-flag.
 package guards
 
 import (

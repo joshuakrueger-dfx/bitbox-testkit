@@ -73,7 +73,15 @@
       "severity": "hint",
       "description": "address_case enum accepts 0 (MIXED), 1 (UPPER), 2 (LOWER) only. Other values rejected.",
       "source": "messages/eth.proto: ETHAddressCase enum",
-      "firmware": {"min": "", "max": ""}
+      "firmware": {"min": "", "max": ""},
+      "detect": [
+        {
+          "kind": "regex",
+          "regex": "address[_-]?[Cc]ase\\s*[:=]\\s*([3-9]\\b|\\d{2,})",
+          "reason": "hardcoded address_case value outside 0..2 range",
+          "fix_hint": "use the ETHAddressCase enum (MIXED=0, UPPER=1, LOWER=2) — values >= 3 are rejected by firmware"
+        }
+      ]
     },
     {
       "id": "E8",
@@ -109,7 +117,15 @@
       "severity": "warning",
       "description": "BTCSignInitRequest.locktime must be < 500_000_000. Timestamp-style locktimes are firmware-rejected.",
       "source": "messages/btc.proto: locktime constraint",
-      "firmware": {"min": "", "max": ""}
+      "firmware": {"min": "", "max": ""},
+      "detect": [
+        {
+          "kind": "regex",
+          "regex": "locktime\\s*[:=]\\s*([5-9]\\d{8}|[1-9]\\d{9,})",
+          "reason": "hardcoded locktime >= 500_000_000 will be interpreted as a Unix timestamp by Bitcoin Script and rejected by BitBox firmware",
+          "fix_hint": "use block-height-style locktimes (< 500_000_000) or derive locktime dynamically"
+        }
+      ]
     },
     {
       "id": "B2",
@@ -279,7 +295,18 @@
       "severity": "critical",
       "description": "Every gomobile-exported function called from the host app must defer-recover, otherwise a Go panic crashes the host. (Analogous: TS WebView bridges must wrap WASM-side throws so the RN side gets a rejected promise rather than a silent stall.)",
       "source": "Observed across BitBox/Ledger/Trezor plugin patches",
-      "firmware": {"min": "", "max": ""}
+      "firmware": {"min": "", "max": ""},
+      "detect": [
+        {
+          "kind": "missing_pair_within",
+          "regex": "^//export\\s+[A-Z][A-Za-z0-9_]*\\s*$",
+          "pair_regex": "defer\\s+recoverPanic\\s*\\(",
+          "within_lines": 6,
+          "file_globs": ["*.go"],
+          "reason": "//export comment is not followed by defer recoverPanic() within 6 lines — a panic in this gomobile entry point would crash the host app",
+          "fix_hint": "add `defer recoverPanic(\"FuncName\")` as the first statement in the function body"
+        }
+      ]
     },
     {
       "id": "A2",
@@ -291,9 +318,10 @@
       "firmware": {"min": "", "max": ""},
       "detect": [
         {
-          "kind": "regex",
-          "regex": "time\\.(Sleep|After)\\(\\s*10\\s*\\*\\s*time\\.Second\\s*\\)|setTimeout\\s*\\([^,)]+,\\s*10000\\s*\\)|\\b10\\s*\\*\\s*1000\\b",
-          "reason": "hard-coded 10-second timeout in transport code blocks long user-confirm flows",
+          "kind": "regex_in_context",
+          "regex": "time\\.(Sleep|After)\\(\\s*10\\s*\\*\\s*time\\.Second\\s*\\)|setTimeout\\s*\\([^,)]+,\\s*10[\\s_]*000\\b|\\b10\\s*\\*\\s*1000\\b",
+          "context_regex": "(?i)bitbox|u2fhid|hardware.?wallet|(?:eth|btc|cardano)Sign[A-Za-z]*|PairedBitBox|PairingBitBox",
+          "reason": "hard-coded 10-second timeout in a BitBox transport / connect / sign / confirm context blocks long user-confirm flows",
           "fix_hint": "switch to context-driven deadlines that can be extended during long user-confirm flows"
         }
       ]
