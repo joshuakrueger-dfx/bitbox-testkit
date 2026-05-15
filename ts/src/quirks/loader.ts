@@ -5,7 +5,7 @@
  */
 
 import rawJson from './quirks.json' with { type: 'json' };
-import type { Quirk, Category, Severity, FirmwareRange, Filter } from './types.js';
+import type { Quirk, Category, Severity, FirmwareRange, Filter, DetectRule } from './types.js';
 import { attachCallbacks } from './callbacks.js';
 
 interface RawQuirk {
@@ -17,6 +17,7 @@ interface RawQuirk {
   source: string;
   firmware: FirmwareRange;
   match_regex?: string;
+  detect?: DetectRule[];
 }
 
 interface RawRegistry {
@@ -45,6 +46,7 @@ function buildRegistry(): readonly Quirk[] {
       source: rq.source,
       firmware: rq.firmware,
       matchRegex: rq.match_regex,
+      patterns: rq.detect,
     };
     attachCallbacks(q);
     out.push(q);

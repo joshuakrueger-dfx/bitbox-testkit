@@ -2,140 +2,192 @@ package main
 
 import (
 	"bytes"
+	"fmt"
 	"os"
+	"path/filepath"
 	"regexp"
 	"strings"
+	"sync"
 
 	"github.com/joshuakrueger-dfx/bitbox-testkit/go/bitbox/quirks"
 )
 
 // Finding is one detected occurrence of a quirk in source.
 type Finding struct {
-	QuirkID    string `json:"quirk_id"`
-	QuirkName  string `json:"quirk_name"`
-	Category   string `json:"category"`
-	Severity   string `json:"severity"`
-	File       string `json:"file"`
-	Line       int    `json:"line"`
-	Snippet    string `json:"snippet"`
-	Reason     string `json:"reason"`
-	Source     string `json:"source"`
-	FixHint    string `json:"fix_hint,omitempty"`
+	QuirkID   string `json:"quirk_id"`
+	QuirkName string `json:"quirk_name"`
+	Category  string `json:"category"`
+	Severity  string `json:"severity"`
+	File      string `json:"file"`
+	Line      int    `json:"line"`
+	Snippet   string `json:"snippet"`
+	Reason    string `json:"reason"`
+	Source    string `json:"source"`
+	FixHint   string `json:"fix_hint,omitempty"`
 }
 
-// scan applies every applicable detector to the given source files and
-// returns the aggregated findings.
+// regexCache prevents recompiling the same pattern across files.
+type regexCache struct {
+	mu sync.Mutex
+	m  map[string]*regexp.Regexp
+}
+
+func (c *regexCache) get(p string) (*regexp.Regexp, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if r, ok := c.m[p]; ok {
+		return r, nil
+	}
+	r, err := regexp.Compile(p)
+	if err != nil {
+		return nil, err
+	}
+	if c.m == nil {
+		c.m = map[string]*regexp.Regexp{}
+	}
+	c.m[p] = r
+	return r, nil
+}
+
+// scan applies every applicable Quirk's data-driven Patterns to the given
+// source files and returns aggregated findings.
 func scan(root string, files []string, applicable []quirks.Quirk) []Finding {
+	cache := &regexCache{}
 	var out []Finding
 	for _, q := range applicable {
-		switch q.ID {
-		case "E1":
-			out = append(out, detectNonAsciiEIP712(files, q, root)...)
-		case "P2":
-			out = append(out, detectBLEDedupOrder(files, q, root)...)
-		case "A2":
-			out = append(out, detectHardcoded10sTimeout(files, q, root)...)
+		for _, rule := range q.Patterns {
+			out = append(out, applyRule(cache, q, rule, files, root)...)
 		}
 	}
 	return out
 }
 
-// Pre-compiled patterns used by static detectors. Kept in this file so
-// adding a new quirk detector means one edit.
-var (
-	eip712Keyword       = regexp.MustCompile(`(?i)eip712|signtyped|signEthTyped`)
-	nonAsciiStringLit   = regexp.MustCompile(`["'][^"']*[\x80-\xff][^"']*["']`)
-	seenPacketsContains = regexp.MustCompile(`seenPackets\.(has|contains|includes)\s*\(`)
-	seenPacketsRemove   = regexp.MustCompile(`seenPackets\.(clear|removeAll|delete)\s*\(`)
-	hardcoded10sTimeout = regexp.MustCompile(`time\.(Sleep|After)\(\s*10\s*\*\s*time\.Second\s*\)|setTimeout\s*\([^,)]+,\s*10000\s*\)|10\s*\*\s*1000`)
-)
+func applyRule(cache *regexCache, q quirks.Quirk, rule quirks.DetectRule, files []string, root string) []Finding {
+	switch rule.Kind {
+	case "regex":
+		return applyRegex(cache, q, rule, files, root)
+	case "regex_in_context":
+		return applyRegexInContext(cache, q, rule, files, root)
+	case "ordered_pair":
+		return applyOrderedPair(cache, q, rule, files, root)
+	default:
+		// Unknown kind — silently skip rather than crash the audit. A
+		// future schema bump can introduce new kinds while older audit
+		// binaries keep running.
+		return nil
+	}
+}
 
-func detectNonAsciiEIP712(files []string, q quirks.Quirk, root string) []Finding {
+func applyRegex(cache *regexCache, q quirks.Quirk, rule quirks.DetectRule, files []string, root string) []Finding {
+	re, err := cache.get(rule.Regex)
+	if err != nil {
+		return nil
+	}
 	var out []Finding
 	for _, path := range files {
+		if !matchesGlobs(path, rule.FileGlobs) {
+			continue
+		}
 		content, err := os.ReadFile(path)
 		if err != nil {
 			continue
 		}
-		if !eip712Keyword.Match(content) {
-			continue
-		}
 		for i, line := range strings.Split(string(content), "\n") {
-			if nonAsciiStringLit.MatchString(line) {
-				out = append(out, Finding{
-					QuirkID:   q.ID,
-					QuirkName: q.Name,
-					Category:  string(q.Category),
-					Severity:  q.Severity.String(),
-					File:      relative(root, path),
-					Line:      i + 1,
-					Snippet:   strings.TrimSpace(line),
-					Reason:    "non-ASCII string literal in a file that touches EIP-712 / signTyped APIs",
-					Source:    q.Source,
-					FixHint:   "transliterate via NFKD + ASCII fallback before sending to BitBox firmware",
-				})
+			if re.MatchString(line) {
+				out = append(out, makeFinding(q, rule, path, root, i+1, line))
 			}
 		}
 	}
 	return out
 }
 
-func detectBLEDedupOrder(files []string, q quirks.Quirk, root string) []Finding {
+func applyRegexInContext(cache *regexCache, q quirks.Quirk, rule quirks.DetectRule, files []string, root string) []Finding {
+	re, err := cache.get(rule.Regex)
+	if err != nil {
+		return nil
+	}
+	ctxRe, err := cache.get(rule.ContextRegex)
+	if err != nil {
+		return nil
+	}
 	var out []Finding
 	for _, path := range files {
+		if !matchesGlobs(path, rule.FileGlobs) {
+			continue
+		}
 		content, err := os.ReadFile(path)
 		if err != nil {
 			continue
 		}
-		containsLoc := seenPacketsContains.FindIndex(content)
-		removeLoc := seenPacketsRemove.FindIndex(content)
-		if containsLoc == nil || removeLoc == nil {
+		if !ctxRe.Match(content) {
 			continue
 		}
-		if removeLoc[0] < containsLoc[0] {
-			line := 1 + bytes.Count(content[:removeLoc[0]], []byte{'\n'})
-			out = append(out, Finding{
-				QuirkID:   q.ID,
-				QuirkName: q.Name,
-				Category:  string(q.Category),
-				Severity:  q.Severity.String(),
-				File:      relative(root, path),
-				Line:      line,
-				Snippet:   extractLine(content, removeLoc[0]),
-				Reason:    "seenPackets.clear/removeAll/delete appears before contains/has/includes",
-				Source:    q.Source,
-				FixHint:   "reorder so the membership check runs before any removal",
-			})
+		for i, line := range strings.Split(string(content), "\n") {
+			if re.MatchString(line) {
+				out = append(out, makeFinding(q, rule, path, root, i+1, line))
+			}
 		}
 	}
 	return out
 }
 
-func detectHardcoded10sTimeout(files []string, q quirks.Quirk, root string) []Finding {
+func applyOrderedPair(cache *regexCache, q quirks.Quirk, rule quirks.DetectRule, files []string, root string) []Finding {
+	beforeRe, err := cache.get(rule.BeforeRegex)
+	if err != nil {
+		return nil
+	}
+	afterRe, err := cache.get(rule.AfterRegex)
+	if err != nil {
+		return nil
+	}
 	var out []Finding
 	for _, path := range files {
+		if !matchesGlobs(path, rule.FileGlobs) {
+			continue
+		}
 		content, err := os.ReadFile(path)
 		if err != nil {
 			continue
 		}
-		for i, line := range strings.Split(string(content), "\n") {
-			if hardcoded10sTimeout.MatchString(line) {
-				out = append(out, Finding{
-					QuirkID:   q.ID,
-					QuirkName: q.Name,
-					Category:  string(q.Category),
-					Severity:  q.Severity.String(),
-					File:      relative(root, path),
-					Line:      i + 1,
-					Snippet:   strings.TrimSpace(line),
-					Reason:    "hard-coded 10-second timeout in transport code",
-					Source:    q.Source,
-					FixHint:   "switch to context-driven deadlines that can be extended during long user-confirm flows",
-				})
-			}
+		beforeLoc := beforeRe.FindIndex(content)
+		afterLoc := afterRe.FindIndex(content)
+		if beforeLoc == nil || afterLoc == nil {
+			continue
+		}
+		if afterLoc[0] < beforeLoc[0] {
+			line := 1 + bytes.Count(content[:afterLoc[0]], []byte{'\n'})
+			out = append(out, makeFinding(q, rule, path, root, line, extractLine(content, afterLoc[0])))
 		}
 	}
 	return out
+}
+
+func makeFinding(q quirks.Quirk, rule quirks.DetectRule, path, root string, line int, snippet string) Finding {
+	return Finding{
+		QuirkID:   q.ID,
+		QuirkName: q.Name,
+		Category:  string(q.Category),
+		Severity:  q.Severity.String(),
+		File:      relative(root, path),
+		Line:      line,
+		Snippet:   strings.TrimSpace(snippet),
+		Reason:    rule.Reason,
+		Source:    q.Source,
+		FixHint:   rule.FixHint,
+	}
+}
+
+func matchesGlobs(path string, globs []string) bool {
+	if len(globs) == 0 {
+		return true
+	}
+	base := filepath.Base(path)
+	for _, g := range globs {
+		if ok, _ := filepath.Match(g, base); ok {
+			return true
+		}
+	}
+	return false
 }
 
 func extractLine(content []byte, offset int) string {
@@ -156,3 +208,26 @@ func relative(root, path string) string {
 	}
 	return path
 }
+
+// Coverage classifies each quirk's static-detectability and how the audit
+// runner can report on it.
+type Coverage struct {
+	Static     []quirks.Quirk // has at least one Pattern → audit-runner checks it statically
+	RuntimeOnly []quirks.Quirk // no Patterns → only catchable via runtime tests
+}
+
+func classify(applicable []quirks.Quirk) Coverage {
+	c := Coverage{}
+	for _, q := range applicable {
+		if len(q.Patterns) > 0 {
+			c.Static = append(c.Static, q)
+		} else {
+			c.RuntimeOnly = append(c.RuntimeOnly, q)
+		}
+	}
+	return c
+}
+
+// unused so far — placeholder to silence the import linter while the
+// Coverage type is wired into reports in a later chunk.
+var _ = fmt.Sprintf

@@ -27,6 +27,46 @@ The Go loader (`/go/bitbox/quirks/loader.go`) embeds and parses this file at ini
 | `firmware.min` | string | yes | Inclusive lower bound (e.g. `"9.15.0"`). Empty means no minimum. |
 | `firmware.max` | string | yes | Exclusive upper bound (e.g. `"9.15.0"`). Empty means no maximum. |
 | `match_regex` | string | no | Regex matching test failure output that could indicate this quirk. Used by audit runners. |
+| `detect` | array | no | Data-driven static-detection rules. Each rule is one of three kinds — see below. Empty/missing means the quirk has no static signature and can only be caught by runtime tests. |
+
+## Detection rules (`detect`)
+
+Each entry in the `detect` array has a `kind` field that decides which other fields are read.
+
+### `kind: "regex"`
+
+Simple line-level match. Flag every line of every in-scope file whose content matches `regex`.
+
+| Field | Required | Notes |
+|-------|----------|-------|
+| `regex` | yes | RE2-compatible pattern. |
+| `file_globs` | no | Array like `["*.ts", "*.tsx"]`. Default: all source files. |
+| `reason` | yes | Human description of what was found. |
+| `fix_hint` | no | One-line suggested remediation. |
+
+### `kind: "regex_in_context"`
+
+Two-pass match. File must first contain `context_regex` somewhere (anywhere — header import, comment, etc.), then per-line `regex` is applied. Used to suppress noise: an umlaut string only matters in a file that touches EIP-712 signing.
+
+| Field | Required | Notes |
+|-------|----------|-------|
+| `regex` | yes | Per-line pattern. |
+| `context_regex` | yes | File-level filter. |
+| `file_globs` | no | |
+| `reason` | yes | |
+| `fix_hint` | no | |
+
+### `kind: "ordered_pair"`
+
+Order-of-occurrence check. The file must contain both `before_regex` and `after_regex`; a finding is emitted when `after_regex` is matched at an earlier byte offset than `before_regex`. Used for "X must happen before Y" patterns (e.g. dedup-check before set-clear).
+
+| Field | Required | Notes |
+|-------|----------|-------|
+| `before_regex` | yes | Pattern that must appear first. |
+| `after_regex` | yes | Pattern that must appear after. |
+| `file_globs` | no | |
+| `reason` | yes | |
+| `fix_hint` | no | |
 
 ## Adding a new quirk
 

@@ -28,6 +28,14 @@ import (
 	"github.com/joshuakrueger-dfx/bitbox-testkit/go/bitbox/quirks"
 )
 
+func quirkIDs(qs []quirks.Quirk) []string {
+	out := make([]string, len(qs))
+	for i, q := range qs {
+		out[i] = q.ID
+	}
+	return out
+}
+
 func main() {
 	var (
 		repo     = flag.String("repo", ".", "path to repository to scan")
@@ -55,6 +63,7 @@ func run(repo, firmware, format, output string) error {
 
 	relevant := quirks.Subset(quirks.Filter{Firmware: firmware})
 	findings := scan(abs, files, relevant)
+	coverage := classify(relevant)
 
 	report := Report{
 		Repo:       abs,
@@ -63,6 +72,10 @@ func run(repo, firmware, format, output string) error {
 		QuirkCount: len(relevant),
 		Findings:   findings,
 		Summary:    summarize(findings),
+		Coverage: CoverageReport{
+			StaticIDs:      quirkIDs(coverage.Static),
+			RuntimeOnlyIDs: quirkIDs(coverage.RuntimeOnly),
+		},
 	}
 
 	w := os.Stdout

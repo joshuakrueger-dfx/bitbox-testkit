@@ -10,7 +10,16 @@
       "description": "Firmware rejects EIP-712 string values containing non-ASCII bytes (umlauts, emojis) with ErrInvalidInput 101. Client must transliterate (e.g. NFKD + ASCII fallback) before signTypedData.",
       "source": "Observed in production; ErrInvalidInput=101 in api/firmware/error.go",
       "firmware": {"min": "", "max": ""},
-      "match_regex": "(?i)\\binvalid[- ]?input\\b|\\b101\\b"
+      "match_regex": "(?i)\\binvalid[- ]?input\\b|\\b101\\b",
+      "detect": [
+        {
+          "kind": "regex_in_context",
+          "regex": "[\"'][^\"']*[\\x80-\\xff][^\"']*[\"']",
+          "context_regex": "(?i)eip712|signtyped|signEthTyped",
+          "reason": "non-ASCII string literal in a file that touches EIP-712 / signTyped APIs",
+          "fix_hint": "transliterate via NFKD + ASCII fallback before sending to BitBox firmware"
+        }
+      ]
     },
     {
       "id": "E2",
@@ -199,7 +208,15 @@
       "severity": "warning",
       "description": "From v9.24.0 firmware no longer accepts 18-word recovery phrases — only 12 or 24. Clients exposing an 18-word UI flow fail on newer firmware.",
       "source": "CHANGELOG v9.24.0: 'Removed support for 18-word recovery phrases'",
-      "firmware": {"min": "9.24.0", "max": ""}
+      "firmware": {"min": "9.24.0", "max": ""},
+      "detect": [
+        {
+          "kind": "regex",
+          "regex": "\\b18[ _-]?word(s)?\\b|\\beighteen[ _-]?words\\b|wordCount\\s*[:=]\\s*18\\b",
+          "reason": "code or UI exposes an 18-word recovery option; v9.24.0+ firmware rejects 18-word phrases",
+          "fix_hint": "drop the 18-word option from any picker; offer only 12 or 24"
+        }
+      ]
     },
     {
       "id": "M2",
@@ -235,7 +252,16 @@
       "severity": "critical",
       "description": "BLE links legitimately retransmit init frames. Plugin-side de-dup logic must NOT drop them — otherwise multi-page signing aborts mid-flow (e.g. 1/13 → 2/13). Historical bug: seenPackets.removeAll() before seenPackets.contains() check.",
       "source": "Observed in production (multi-page sign abort)",
-      "firmware": {"min": "", "max": ""}
+      "firmware": {"min": "", "max": ""},
+      "detect": [
+        {
+          "kind": "ordered_pair",
+          "before_regex": "seenPackets\\.(has|contains|includes)\\s*\\(",
+          "after_regex": "seenPackets\\.(clear|removeAll|delete)\\s*\\(",
+          "reason": "seenPackets.clear/removeAll/delete appears before contains/has/includes — legitimate retransmits get dropped",
+          "fix_hint": "reorder so the membership check runs before any removal"
+        }
+      ]
     },
     {
       "id": "P3",
@@ -262,7 +288,15 @@
       "severity": "critical",
       "description": "Hard-coded transport timeouts (e.g. 10s) block user-confirm flows where the user takes longer than the timeout. Use context deadlines with confirmation-aware extensions.",
       "source": "Observed in production (long-confirm flow aborts)",
-      "firmware": {"min": "", "max": ""}
+      "firmware": {"min": "", "max": ""},
+      "detect": [
+        {
+          "kind": "regex",
+          "regex": "time\\.(Sleep|After)\\(\\s*10\\s*\\*\\s*time\\.Second\\s*\\)|setTimeout\\s*\\([^,)]+,\\s*10000\\s*\\)|\\b10\\s*\\*\\s*1000\\b",
+          "reason": "hard-coded 10-second timeout in transport code blocks long user-confirm flows",
+          "fix_hint": "switch to context-driven deadlines that can be extended during long user-confirm flows"
+        }
+      ]
     },
     {
       "id": "A3",

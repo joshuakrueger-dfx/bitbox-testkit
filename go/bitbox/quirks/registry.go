@@ -91,10 +91,31 @@ func (r FirmwareRange) String() string {
 	return r.Min + " <= v < " + r.Max
 }
 
+// DetectRule is a data-driven static-detection pattern, loaded from
+// quirks.json. The audit-runner iterates each Quirk's Patterns and applies
+// them to source files.
+//
+// Kind decodes how the other fields are used:
+//
+//	"regex"             — line-level match against Regex. FileGlobs limits files.
+//	"regex_in_context"  — two-pass: file must contain ContextRegex first,
+//	                      then per-line Regex flags occurrences.
+//	"ordered_pair"      — file must contain both BeforeRegex and AfterRegex;
+//	                      violation = AfterRegex appears before BeforeRegex.
+type DetectRule struct {
+	Kind         string   `json:"kind"`
+	Regex        string   `json:"regex,omitempty"`
+	ContextRegex string   `json:"context_regex,omitempty"`
+	BeforeRegex  string   `json:"before_regex,omitempty"`
+	AfterRegex   string   `json:"after_regex,omitempty"`
+	FileGlobs    []string `json:"file_globs,omitempty"`
+	Reason       string   `json:"reason"`
+	FixHint      string   `json:"fix_hint,omitempty"`
+}
+
 // Quirk is one documented BitBox firmware constraint.
 type Quirk struct {
-	// ID is a short stable identifier ("E1", "B7", "P2"). Pick the prefix
-	// from the category and increment within the category file.
+	// ID is a short stable identifier ("E1", "B7", "P2").
 	ID string
 
 	// Name is a kebab-case slug suitable for log lines and reports.
@@ -115,19 +136,23 @@ type Quirk struct {
 	// Firmware bounds the firmware versions the quirk applies to.
 	Firmware FirmwareRange
 
-	// Detect runs a static source check. May be nil for quirks that have no
-	// statically-detectable pattern.
+	// Detect runs a static source check at test-time (using a Go testing.TB).
+	// Independent of Patterns: Detect is the rich/code-driven path used by
+	// dedicated test suites; Patterns drive the data-driven audit-runner.
 	Detect func(t guards.TB, srcDir, include string)
 
 	// Scenario returns a configured *fake.Fake the consumer plugs into
-	// firmware.NewDevice. May be nil for quirks that only have a static
-	// shape (e.g. enum-only constraints best caught at compile time).
+	// firmware.NewDevice.
 	Scenario func() *fake.Fake
 
 	// Match returns true if a Go test failure output line could plausibly
 	// be caused by this quirk. Used by audit runners to classify failures.
-	// May be nil — if so, the audit runner falls back to a generic match.
 	Match func(testOutputLine string) bool
+
+	// Patterns are data-driven static-detection rules loaded from quirks.json.
+	// Empty means the quirk has no statically-detectable signature; the
+	// audit-runner surfaces it as "needs runtime test coverage".
+	Patterns []DetectRule
 }
 
 // Registry holds every known quirk. Populated by init() in category files.

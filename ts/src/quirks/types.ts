@@ -21,6 +21,22 @@ export interface FirmwareRange {
 }
 
 /**
+ * Data-driven static-detection rule, loaded verbatim from quirks.json.
+ * Mirrors Go's quirks.DetectRule.
+ */
+export interface DetectRule {
+  /** "regex" | "regex_in_context" | "ordered_pair" */
+  readonly kind: string;
+  readonly regex?: string;
+  readonly context_regex?: string;
+  readonly before_regex?: string;
+  readonly after_regex?: string;
+  readonly file_globs?: readonly string[];
+  readonly reason: string;
+  readonly fix_hint?: string;
+}
+
+/**
  * One documented BitBox firmware constraint.
  */
 export interface Quirk {
@@ -34,9 +50,12 @@ export interface Quirk {
   /** regex (as a string) matching Jest output that could indicate this quirk */
   readonly matchRegex?: string;
 
+  /** Data-driven static-detection rules. Empty means no static signature. */
+  readonly patterns?: readonly DetectRule[];
+
   /**
    * Source-level static check. Consumer passes a glob of files to scan.
-   * May be undefined for quirks that have no statically detectable pattern.
+   * Higher-level than `patterns` — handles complex/code-driven detection.
    */
   detect?: (sourcePaths: string[]) => readonly DetectFinding[];
 
@@ -44,9 +63,6 @@ export interface Quirk {
    * Scenario factory: returns a mock setup function. Pass it to
    * `installMocks()` (or call inside `jest.mock()`) to make the bitbox-api
    * surface return the documented firmware response.
-   *
-   * The returned function is wallet-API-specific (it produces a fake
-   * PairedBitBox), so its concrete shape lives in /ts/src/fake.
    */
   scenario?: () => unknown;
 }

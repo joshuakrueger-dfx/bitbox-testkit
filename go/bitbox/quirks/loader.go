@@ -18,14 +18,15 @@ type rawFirmware struct {
 }
 
 type rawQuirk struct {
-	ID          string      `json:"id"`
-	Name        string      `json:"name"`
-	Category    string      `json:"category"`
-	Severity    string      `json:"severity"`
-	Description string      `json:"description"`
-	Source      string      `json:"source"`
-	Firmware    rawFirmware `json:"firmware"`
-	MatchRegex  string      `json:"match_regex"`
+	ID          string       `json:"id"`
+	Name        string       `json:"name"`
+	Category    string       `json:"category"`
+	Severity    string       `json:"severity"`
+	Description string       `json:"description"`
+	Source      string       `json:"source"`
+	Firmware    rawFirmware  `json:"firmware"`
+	MatchRegex  string       `json:"match_regex"`
+	Detect      []DetectRule `json:"detect,omitempty"`
 }
 
 type rawRegistry struct {
@@ -48,6 +49,7 @@ func init() {
 			Description: raw.Description,
 			Source:      raw.Source,
 			Firmware:    FirmwareRange{Min: raw.Firmware.Min, Max: raw.Firmware.Max},
+			Patterns:    raw.Detect,
 		}
 		attachCallbacks(&q)
 		Register(q)
