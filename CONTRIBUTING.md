@@ -85,10 +85,19 @@ A Scenario returns a configured fake suitable for use in a single test. Two ques
 
 Tags follow `v0.MAJOR.MINOR` semver. The TypeScript package and the Go module both pick up the same tag — there's no separate cadence. CHANGELOG.md must be updated as part of the release commit.
 
+The Go module lives at `/go/`, so Go's submodule-tagging convention requires **two** tags pointing at the same commit: `vX.Y.Z` for the repo / composite-action ref, and `go/vX.Y.Z` for `go install` to resolve the package. Without the `go/` prefixed tag, consumers hit:
+
+> `module github.com/joshuakrueger-dfx/bitbox-testkit@vX.Y.Z found, but does not contain package …/go/cmd/bitbox-audit`
+
 ```bash
 # Bump version in /ts/package.json
 # Update CHANGELOG.md
 git commit -am "Release vX.Y.Z"
-git tag vX.Y.Z -m "Release vX.Y.Z"
+
+# Two tags, one commit. The 'go/' prefix is required by Go's
+# submodule resolver — see https://go.dev/ref/mod#vcs-version.
+git tag -a vX.Y.Z -m "Release vX.Y.Z"
+git tag -a go/vX.Y.Z -m "go/vX.Y.Z: submodule tag matching vX.Y.Z" vX.Y.Z^{}
+
 git push origin main --tags
 ```
