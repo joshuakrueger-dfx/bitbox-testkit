@@ -155,6 +155,70 @@ The sticky comment shows:
 - **Coverage buckets**: which quirks are statically detected, which are covered by passing runtime tests, which have failing tests, which are untested.
 - **Untested quirks**: explicit list. Each one is a gap until you add a test for it.
 
+### 6 · End-to-end against the real firmware (`bitbox-simulator`)
+
+The audit catches anti-patterns in your source. The simulator action catches what only the actual BitBox firmware can tell you: does your wire format round-trip, does pairing complete, do multi-page typed-data signs hold, does the firmware accept the bytes you're about to ship to a user's device.
+
+`.github/workflows/bitbox-simulator.yml`:
+
+```yaml
+name: bitbox-simulator
+on:
+  pull_request:
+    paths:
+      - 'src/**'
+      - 'test/**'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  simulator:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: joshuakrueger-dfx/bitbox-testkit/.github/actions/bitbox-simulator@v0.5.0
+        with:
+          testkit-ref: v0.5.0
+          # Optional:
+          #   firmware: bitbox02-multi-v9.21.0-simulator1.0.0-linux-amd64
+          #   firmware: all      # matrix over every embedded firmware
+```
+
+What runs: the action downloads the SHA-pinned upstream BitBox02 simulator binary, brings it up via `Init → ChannelHash → ChannelHashVerify`, restores the deterministic fixture seed (root fingerprint `4c00739d`), then runs the **14 baseline scenarios** in order:
+
+1. `pair_and_device_info` — Noise XX + DeviceInfo
+2. `restore_simulator_mnemonic` — deterministic seed
+3. `root_fingerprint_deterministic` — pins `4c00739d`
+4. `eth_address_mainnet` — chainId=1 BIP-44
+5. `eth_address_polygon_multibyte_v` — chainId=137 address
+6. `eth_sign_message_ascii` — short personal sign
+7. `eth_sign_message_boundary_1024` — firmware-doc max
+8. `eth_sign_legacy_polygon_multibyte_v` — actual EIP-155 sign at chainId=137
+9. `eth_sign_eip1559_mainnet` — type-2 tx, realistic payload
+10. `eth_sign_typed_data_kyc_multipage` — 13-field EIP-712 multi-page (1/13 → 13/13)
+11. `eth_sign_typed_data_non_ascii_rejected` — quirk E1 firmware-reject contract
+12. `btc_xpub_zpub_mainnet` — BIP-84 ZPUB shape
+13. `btc_address_p2wpkh_mainnet` — bech32 `bc1q…`
+14. `btc_address_p2tr_taproot` — bech32m `bc1p…`
+15. `btc_sign_message_mainnet` — 64-byte sig + 65-byte Electrum envelope
+
+Total run on a GitHub-hosted Linux runner: ~400ms scenarios + ~3s setup. The simulator is **Linux/amd64 only** — on macOS / Windows / arm runners the action exits cleanly with a `skipped` status (use `fail-on-skip: true` to make non-Linux a hard fail).
+
+#### Matrix mode
+
+Set `firmware: all` to drive every embedded firmware version (v9.19.0 → v9.26.1) in parallel. Catches regressions that only surface on older firmwares still in the user wild — the BitBox02 only auto-updates when the user opens the BitBoxApp, so production has a long tail.
+
+#### Slash trigger
+
+Comment `/bitbox-simulator` on any PR. Modifiers: `firmware=v9.21.0`, `firmware=all`, `ref=Y`, `fail`. Auth gated on `author_association ∈ {OWNER, MEMBER, COLLABORATOR}`.
+
+#### What it doesn't catch
+
+The simulator validates the `bitbox-api` ↔ firmware protocol surface. It does **not** validate your consumer's USB-HID / BLE transport layer against real hardware — that still requires a physical BitBox02. The two checks are complementary: audit covers source patterns, simulator covers firmware contract, hardware-on-the-table covers transport.
+
 ---
 
 ## Test naming convention (important)

@@ -68,11 +68,26 @@ func (i *Instance) Stop() {
 // cacheDir is where downloaded binaries live; reuse it across tests to
 // avoid re-downloading.
 func Launch(cacheDir string) (*Instance, error) {
+	return LaunchVersion(cacheDir, "")
+}
+
+// LaunchVersion is Launch with an explicit binary version. Pass the
+// `Name` field of one of Simulators() (e.g. "bitbox02-multi-9.21.0")
+// or an empty string for the newest known build. The BITBOX_SIMULATOR
+// env override (absolute path to a binary on disk) takes precedence
+// over this argument — that lets a developer drop in a local debug
+// build without needing to extend the embedded list.
+//
+// Returns ErrSimulatorNotFound if the name does not match any
+// embedded entry, which is a deliberately distinct error from
+// ErrUnsupportedPlatform so the CLI's --firmware flag can give a
+// helpful "did you mean…" hint.
+func LaunchVersion(cacheDir, name string) (*Instance, error) {
 	if runtime.GOOS != "linux" || runtime.GOARCH != "amd64" {
 		return nil, ErrUnsupportedPlatform
 	}
 
-	path, err := resolveBinary(cacheDir)
+	path, err := resolveBinary(cacheDir, name)
 	if err != nil {
 		return nil, err
 	}
@@ -103,7 +118,11 @@ func Launch(cacheDir string) (*Instance, error) {
 	}, nil
 }
 
-func resolveBinary(cacheDir string) (string, error) {
+// ErrSimulatorNotFound is returned when LaunchVersion is given a name
+// that does not appear in Simulators().
+var ErrSimulatorNotFound = errors.New("bitbox/simulator: requested version not in embedded list")
+
+func resolveBinary(cacheDir, name string) (string, error) {
 	if override := os.Getenv("BITBOX_SIMULATOR"); override != "" {
 		abs, err := filepath.Abs(override)
 		if err != nil {
@@ -123,5 +142,36 @@ func resolveBinary(cacheDir string) (string, error) {
 	if len(bins) == 0 {
 		return "", errors.New("bitbox/simulator: no embedded simulator list")
 	}
-	return cache.Resolve(bins[0])
+	if name == "" {
+		return cache.Resolve(bins[0])
+	}
+	for _, b := range bins {
+		if b.Name == name {
+			return cache.Resolve(b)
+		}
+	}
+	return "", fmt.Errorf("%w: %q (have: %s)", ErrSimulatorNotFound, name, listNames(bins))
+}
+
+// listNames renders the embedded names as a comma-joined string for
+// error messages.
+func listNames(bins []coresim.Binary) string {
+	names := make([]string, len(bins))
+	for i, b := range bins {
+		names[i] = b.Name
+	}
+	return joinNames(names)
+}
+
+// joinNames is strings.Join factored out so the simulator package
+// does not pull in "strings" purely for an error helper.
+func joinNames(names []string) string {
+	out := ""
+	for i, n := range names {
+		if i > 0 {
+			out += ", "
+		}
+		out += n
+	}
+	return out
 }

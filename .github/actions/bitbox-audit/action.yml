@@ -10,10 +10,10 @@ inputs:
   testkit-ref:
     description: >
       Git ref of joshuakrueger-dfx/bitbox-testkit to install. Pin to a
-      tag (v0.2.0) for reproducibility; use 'main' during testkit
+      tag (v0.5.0) for reproducibility; use 'main' during testkit
       development to track the bleeding edge.
     required: false
-    default: v0.2.0
+    default: v0.5.0
   firmware:
     description: >
       Optional firmware version (e.g. 9.23.0) to narrow the quirk set to

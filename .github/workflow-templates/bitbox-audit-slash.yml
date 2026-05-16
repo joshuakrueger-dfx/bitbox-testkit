@@ -68,7 +68,7 @@ jobs:
             const args = body.replace(/^\/bitbox-audit\s*/, '').split(/\s+/).filter(Boolean);
             let firmware = '';
             let failOnFindings = 'false';
-            let testkitRef = 'v0.2.0';
+            let testkitRef = 'v0.5.0';
             for (const tok of args) {
               if (tok === 'fail') { failOnFindings = 'true'; continue; }
               const [k, v] = tok.split('=');
@@ -115,7 +115,7 @@ jobs:
           TESTKIT_REF: ${{ needs.guard.outputs.testkit-ref }}
           FIRMWARE: ${{ needs.guard.outputs.firmware }}
 
-      - uses: joshuakrueger-dfx/bitbox-testkit/.github/actions/bitbox-audit@v0.2.0
+      - uses: joshuakrueger-dfx/bitbox-testkit/.github/actions/bitbox-audit@v0.5.0
         with:
           testkit-ref: ${{ needs.guard.outputs.testkit-ref }}
           firmware: ${{ needs.guard.outputs.firmware }}

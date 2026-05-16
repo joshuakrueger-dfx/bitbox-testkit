@@ -16,7 +16,7 @@ inputs:
       controls the action.yml itself. Mismatched refs leave the CLI
       running with stale embedded SHA pins — keep these in sync.
     required: false
-    default: v0.4.2
+    default: v0.5.0
   comment-on-pr:
     description: >
       'true' to post the markdown report as a sticky PR comment.
@@ -37,6 +37,15 @@ inputs:
       red check just because the simulator can't run there.
     required: false
     default: 'false'
+  firmware:
+    description: >
+      Specific embedded firmware name (e.g.
+      bitbox02-multi-v9.21.0-simulator1.0.0-linux-amd64) or 'all' to
+      run the matrix over every embedded firmware. Default '' = newest.
+      Matrix mode catches regressions that only surface on older
+      firmwares still in the production tail.
+    required: false
+    default: ''
 
 outputs:
   report-path:
@@ -74,11 +83,13 @@ runs:
       env:
         FAIL_ON_FINDINGS: ${{ inputs.fail-on-findings }}
         FAIL_ON_SKIP: ${{ inputs.fail-on-skip }}
+        FIRMWARE: ${{ inputs.firmware }}
       run: |
         set -o pipefail
         mkdir -p .bitbox-simulator
         flags=()
         if [ "$FAIL_ON_SKIP" = "true" ]; then flags+=(--fail-on-skip); fi
+        if [ -n "$FIRMWARE" ]; then flags+=(--firmware "$FIRMWARE"); fi
 
         # JSON first so the markdown render can reuse the SAME run.
         rc=0

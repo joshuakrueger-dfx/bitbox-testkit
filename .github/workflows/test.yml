@@ -61,6 +61,54 @@ jobs:
           mkdir -p "$WALLET_TESTKIT_SIMCACHE"
           go test -tags simulator -timeout 5m ./bitbox/simulator/...
 
+  go-simulator-matrix:
+    # Runs the full baseline against EVERY embedded firmware version
+    # (v9.19.0 → v9.26.1). Catches regressions where a new scenario
+    # works against the newest firmware but breaks against an older
+    # one a real user may still be running — important because the
+    # BitBox02 only auto-updates when the user opens the BitBoxApp,
+    # so production has a long tail of older firmwares in the wild.
+    name: simulator matrix · ${{ matrix.firmware }}
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: go
+    strategy:
+      fail-fast: false
+      matrix:
+        firmware:
+          - bitbox02-multi-v9.26.1-simulator1.0.0-linux-amd64
+          - bitbox02-multi-v9.25.0-simulator1.0.0-linux-amd64
+          - bitbox02-multi-v9.24.0-simulator1.0.0-linux-amd64
+          - bitbox02-multi-v9.23.0-simulator1.0.0-linux-amd64
+          - bitbox02-multi-v9.22.0-simulator1.0.0-linux-amd64
+          - bitbox02-multi-v9.21.0-simulator1.0.0-linux-amd64
+          - bitbox02-multi-v9.20.0-simulator1.0.0-linux-amd64
+          - bitbox02-multi-v9.19.0-simulator1.0.0-linux-amd64
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.24'
+          cache: true
+          cache-dependency-path: go/go.sum
+      - name: cache simulator binaries
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/bitbox-testkit-simulators
+          key: bitbox-simulators-${{ hashFiles('go/bitbox/simulator/embedded.go') }}
+          restore-keys: |
+            bitbox-simulators-
+      - name: run scenarios against ${{ matrix.firmware }}
+        env:
+          WALLET_TESTKIT_SIMCACHE: ${{ github.workspace }}/.simcache
+        run: |
+          mkdir -p "$WALLET_TESTKIT_SIMCACHE"
+          go run -tags simulator ./cmd/bitbox-simulator-check \
+            --firmware "${{ matrix.firmware }}" \
+            --cache "$WALLET_TESTKIT_SIMCACHE" \
+            --format markdown
+
   ts-unit:
     name: TypeScript unit tests
     runs-on: ubuntu-latest
