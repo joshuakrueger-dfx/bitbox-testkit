@@ -35,12 +35,18 @@ type Scenario func(dev *firmware.Device) Result
 //
 // The simulator firmware accepts these calls without user interaction
 // because it auto-confirms every prompt; on a physical BitBox the
-// user would tap to confirm. For each scenario we assert what the
-// CONSUMER would see — error class, byte shape, identity contract.
+// user would tap to confirm. The simulator is pre-loaded with a fixed
+// mnemonic ("boring mistake dish oyster truth pigeon viable emerge
+// sort crash wire portion cannon couple enact box walk height pull
+// today solid off enable tide") so address-derivation outputs are
+// deterministic.
+//
+// For each scenario we assert what the CONSUMER would see — error
+// class, byte shape, identity contract.
 func BaselineScenarios() []Scenario {
 	return []Scenario{
 		PairAndDeviceInfo,
-		InitDeviceWithFreshSeed,
+		RestoreSimulatorMnemonic,
 		EthAddressMainnet,
 		EthAddressPolygonMultiByteV,
 		EthSignMessageAscii,
@@ -68,20 +74,29 @@ func PairAndDeviceInfo(dev *firmware.Device) Result {
 	})
 }
 
-// InitDeviceWithFreshSeed sets a password (which generates a fresh
-// random seed on the device). The simulator's auto-confirm short-
-// circuits the on-screen passphrase entry. Following scenarios
-// expect a seeded device.
-func InitDeviceWithFreshSeed(dev *firmware.Device) Result {
-	return run("init_device_with_fresh_seed", func() error {
-		// 32 bytes ≙ 24-word mnemonic.
-		if err := dev.SetPassword(32); err != nil {
-			// Already-initialized is OK — re-running the suite against
-			// a persistent simulator should not fail.
+// RestoreSimulatorMnemonic walks the simulator into its deterministic
+// "seeded + initialised" state via the upstream-recommended pattern:
+// after pairing the device is uninitialised; RestoreFromMnemonic()
+// triggers the on-device mnemonic-entry flow which the simulator
+// auto-completes from its baked-in fixture phrase
+// ("boring mistake dish oyster truth pigeon viable emerge sort crash
+// wire portion cannon couple enact box walk height pull today solid
+// off enable tide"). After this, every ETH endpoint produces
+// deterministic outputs.
+//
+// The previous SetPassword(32) attempt put the device into the
+// "showing newly-generated mnemonic" state and ETH endpoints rejected
+// every call with "can't call this endpoint: wrong state".
+func RestoreSimulatorMnemonic(dev *firmware.Device) Result {
+	return run("restore_simulator_mnemonic", func() error {
+		if err := dev.RestoreFromMnemonic(); err != nil {
+			// Already-initialised is fine — a persistent-cache rerun
+			// against the same simulator binary on the same disk
+			// would re-encounter the same state.
 			if strings.Contains(err.Error(), "already") || strings.Contains(err.Error(), "initialized") {
 				return nil
 			}
-			return fmt.Errorf("SetPassword: %w", err)
+			return fmt.Errorf("RestoreFromMnemonic: %w", err)
 		}
 		return nil
 	})
