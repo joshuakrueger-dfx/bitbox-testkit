@@ -73,11 +73,16 @@ func (c *Cache) Resolve(b Binary) (string, error) {
 	if err := downloadTo(path, b.URL); err != nil {
 		return "", fmt.Errorf("simulator: download %s: %w", b.URL, err)
 	}
-	if ok, err := verifyFile(path, b.SHA256); err != nil {
+	actual, err := fileHash(path)
+	if err != nil {
 		return "", fmt.Errorf("simulator: hash check %s: %w", path, err)
-	} else if !ok {
+	}
+	if actual != b.SHA256 {
 		_ = os.Remove(path)
-		return "", fmt.Errorf("simulator: hash mismatch for %s", path)
+		return "", fmt.Errorf(
+			"simulator: hash mismatch for %s — expected %s, actual %s (upstream artefact may have been rebuilt; bump the embedded SHA after manual cross-check)",
+			b.Name, b.SHA256, actual,
+		)
 	}
 	if runtime.GOOS != "windows" {
 		if err := os.Chmod(path, 0o755); err != nil {
@@ -88,16 +93,24 @@ func (c *Cache) Resolve(b Binary) (string, error) {
 }
 
 func verifyFile(path, expected string) (bool, error) {
-	f, err := os.Open(path)
+	got, err := fileHash(path)
 	if err != nil {
 		return false, err
+	}
+	return got == expected, nil
+}
+
+func fileHash(path string) (string, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return "", err
 	}
 	defer f.Close()
 	h := sha256.New()
 	if _, err := io.Copy(h, f); err != nil {
-		return false, err
+		return "", err
 	}
-	return hex.EncodeToString(h.Sum(nil)) == expected, nil
+	return hex.EncodeToString(h.Sum(nil)), nil
 }
 
 func downloadTo(path, url string) error {
