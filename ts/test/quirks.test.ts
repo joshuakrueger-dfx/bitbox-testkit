@@ -1,8 +1,20 @@
+import { readFileSync } from 'fs';
+import { fileURLToPath } from 'url';
+import { dirname, resolve } from 'path';
 import { Registry, subset, firmwareApplies } from '../src/quirks/index.js';
 
+const __dirname = dirname(fileURLToPath(import.meta.url));
+const quirksJsonPath = resolve(__dirname, '../src/quirks/quirks.json');
+const rawQuirks: { quirks: unknown[] } = JSON.parse(readFileSync(quirksJsonPath, 'utf8'));
+
 describe('quirks registry', () => {
-  it('loads all 30 quirks from quirks.json', () => {
-    expect(Registry.length).toBe(30);
+  // Self-consistent count: the Registry MUST expose exactly the number
+  // of quirks documented in quirks.json. Hardcoded numbers go stale
+  // every release; reading the source-of-truth keeps the assertion
+  // load-bearing without needing a manual bump.
+  it('loads every quirk from quirks.json into the Registry', () => {
+    expect(Registry.length).toBe(rawQuirks.quirks.length);
+    expect(Registry.length).toBeGreaterThanOrEqual(31);
   });
 
   it('has no duplicate IDs', () => {

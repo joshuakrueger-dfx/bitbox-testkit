@@ -32,8 +32,6 @@ import (
 	"runtime"
 	"time"
 
-	"github.com/BitBoxSwiss/bitbox02-api-go/api/firmware"
-	"github.com/flynn/noise"
 	"github.com/joshuakrueger-dfx/bitbox-testkit/go/bitbox/simulator"
 )
 
@@ -135,39 +133,9 @@ func buildReport(cacheDirFlag string, failOnSkip bool) Report {
 	}
 	defer inst.Stop()
 
-	// The firmware client expects a Communication, a ConfigInterface
-	// (for persisting Noise keys across sessions — we keep them in-mem
-	// since the simulator is throw-away), and a Logger.
-	dev := firmware.NewDevice(
-		nil, // version: query from device via OP_INFO (firmware ≥ 4.3.0)
-		nil, // product: same
-		&memoryConfig{},
-		inst.Comm,
-		noopLogger{},
-	)
-	if err := dev.Init(); err != nil {
-		return failed(started, host, fmt.Errorf("firmware.Device.Init: %w", err))
-	}
-
-	// Noise XX handshake completed; now wait for the simulator firmware
-	// to mark the pairing as device-confirmed (it auto-confirms within
-	// a few hundred ms — on a physical BitBox this would require the
-	// user to compare + tap on the device screen). Once confirmed, we
-	// acknowledge from the app side via ChannelHashVerify(true), and
-	// the firmware unlocks the rest of the API surface.
-	deadline := time.Now().Add(5 * time.Second)
-	for {
-		_, verified := dev.ChannelHash()
-		if verified {
-			dev.ChannelHashVerify(true)
-			break
-		}
-		if time.Now().After(deadline) {
-			return failed(started, host, fmt.Errorf(
-				"firmware.Device: channel-hash never device-verified within 5s — the simulator should auto-confirm",
-			))
-		}
-		time.Sleep(100 * time.Millisecond)
+	dev, err := simulator.Connect(inst, simulator.ConnectOptions{})
+	if err != nil {
+		return failed(started, host, err)
 	}
 
 	report := Report{
@@ -237,37 +205,3 @@ func renderMarkdown(r Report) string {
 	return out
 }
 
-// memoryConfig is a minimal in-memory ConfigInterface. The simulator
-// regenerates the app keypair every run because the kept-state never
-// survives the process exit; that's fine for a CI run.
-type memoryConfig struct {
-	devicePubkeys [][]byte
-	appKey        *noise.DHKey
-}
-
-func (c *memoryConfig) ContainsDeviceStaticPubkey(pubkey []byte) bool {
-	for _, k := range c.devicePubkeys {
-		if string(k) == string(pubkey) {
-			return true
-		}
-	}
-	return false
-}
-func (c *memoryConfig) AddDeviceStaticPubkey(pubkey []byte) error {
-	c.devicePubkeys = append(c.devicePubkeys, append([]byte(nil), pubkey...))
-	return nil
-}
-func (c *memoryConfig) GetAppNoiseStaticKeypair() *noise.DHKey { return c.appKey }
-func (c *memoryConfig) SetAppNoiseStaticKeypair(key *noise.DHKey) error {
-	c.appKey = key
-	return nil
-}
-
-// noopLogger silences the firmware library's logging output. The CLI
-// captures pass/fail per scenario, so a debug stream from the library
-// would just be noise.
-type noopLogger struct{}
-
-func (noopLogger) Error(string, error) {}
-func (noopLogger) Info(string)         {}
-func (noopLogger) Debug(string)        {}

@@ -70,9 +70,19 @@ export class FakePairedBitBox {
     return this._calls.map((c) => ({ method: c.method, args: [...c.args] }));
   }
 
+  /** Clear the recorded call log without releasing the fake. */
+  clearCalls(): this {
+    this._calls = [];
+    return this;
+  }
+
   /**
    * Returns a Proxy that routes any property access into the handler
    * map. Use this as a drop-in replacement for `PairedBitBox`.
+   *
+   * The generic parameter is the wallet-API shape you expect (e.g. an
+   * import from `bitbox-api`). It is a pure type cast; the proxy does
+   * no runtime check against the type's structure.
    */
   asPairedBitBox<T = unknown>(): T {
     const self = this;
@@ -80,13 +90,20 @@ export class FakePairedBitBox {
       {},
       {
         get(_target, prop) {
-          // Allow direct access to a few synthetic helpers without
-          // going through dispatch.
-          if (prop === '__fake__') return self;
-          if (prop === 'close') return () => self.close();
-          if (prop === 'free') return () => self.close();
+          // Symbol-keyed property lookups (Symbol.toPrimitive,
+          // Symbol.asyncIterator, then/catch probes from awaiters)
+          // must NOT be treated as dispatched methods — returning a
+          // function for `then` would make every proxy access look
+          // thenable and infect await chains.
+          if (typeof prop === 'symbol') return undefined;
+          if (prop === 'then' || prop === 'catch' || prop === 'finally') return undefined;
 
-          const method = String(prop);
+          // Synthetic helpers exposed directly on the proxy for
+          // introspection and cleanup paths.
+          if (prop === '__fake__') return self;
+          if (prop === 'close' || prop === 'free') return () => self.close();
+
+          const method = prop;
           return (...args: unknown[]) => {
             if (self._closed) {
               return Promise.reject(new ClosedError());

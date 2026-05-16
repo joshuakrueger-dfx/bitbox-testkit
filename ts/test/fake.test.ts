@@ -62,4 +62,28 @@ describe('FakePairedBitBox', () => {
     });
     await expect(proxy.deviceInfo()).resolves.toEqual({ name: 'BB' });
   });
+
+  it('proxy does NOT pretend to be thenable (avoids awaiter false-positives)', () => {
+    const proxy = new FakePairedBitBox().asPairedBitBox<Record<string, unknown>>();
+    // `await proxy` would call proxy.then(...) and infect chains otherwise.
+    expect(proxy.then).toBeUndefined();
+    expect(proxy.catch).toBeUndefined();
+    expect(proxy.finally).toBeUndefined();
+  });
+
+  it('proxy returns undefined for symbol-keyed lookups', () => {
+    const proxy = new FakePairedBitBox().asPairedBitBox<Record<symbol, unknown>>();
+    expect((proxy as unknown as { [Symbol.iterator]?: unknown })[Symbol.iterator]).toBeUndefined();
+  });
+
+  it('clearCalls drops the recorded log without affecting handlers', async () => {
+    const fake = new FakePairedBitBox().on('a', async () => 'x');
+    const proxy = fake.asPairedBitBox<{ a: () => Promise<string> }>();
+    await proxy.a();
+    expect(fake.calls).toHaveLength(1);
+    fake.clearCalls();
+    expect(fake.calls).toHaveLength(0);
+    // handler still works
+    await expect(proxy.a()).resolves.toBe('x');
+  });
 });
