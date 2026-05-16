@@ -2,6 +2,29 @@
 
 All notable changes to bitbox-testkit. The project uses semantic versioning starting from v0.1.0.
 
+## v0.2.0 — 2026-05-16
+
+Reusable distribution: one `uses:` step gives any DFX repo a fully wired BitBox audit. Quirk count climbs from 30 → 31; static detection from 7 → 11.
+
+### Added
+
+- **Composite GitHub Action** `joshuakrueger-dfx/bitbox-testkit/.github/actions/bitbox-audit@v0.2.0`: encapsulates Go + Node setup, dependency install, Jest `--json`, audit CLI install + run, sticky PR comment, artifact upload. Inputs cover firmware narrowing, `jest-extra-args`, `fail-on-findings`, testkit ref pinning, WASM hash check toggle.
+- **Slash-command template** `bitbox-audit-slash.yml`: a maintainer comments `/bitbox-audit [firmware=X] [ref=Y] [fail]` on any PR to trigger an on-demand audit. Authorization gates on `author_association ∈ {OWNER, MEMBER, COLLABORATOR}`.
+- **Workflow templates** registered as `.github/workflow-templates/` so GitHub's "New workflow" UI lists them for any org-owned repo.
+- **Quirk A4** — address-display-on-device-required (consumer must call `BTCAddress(displayOnDevice=true)` for receive flows, else man-in-the-middle on `getAddress` JSON-RPC).
+- **Static detection** for quirks B2, C2, A3, A4. Coverage now 11 of 31 (E1, E7, B1, B2, C2, M1, P2, A1, A2, A3, A4).
+- **CI: composite action self-test job** runs the action against the testkit itself to catch regressions in the action's own shell logic. YAML-lint job parses every workflow/action under `.github/`.
+
+### Changed
+
+- **ONBOARDING.md** §4 rewritten: composite-action `uses:` line is now the recommended path; long-form workflow demoted to fallback.
+- **A1 detection** narrowed from "any `//export`" to "any `//export` without a paired `defer recoverPanic(` within 6 lines" via the new `missing_pair_within` rule kind — fixed false-positive on every cgo binding in `bitbox_flutter`.
+- **A2 detection** narrowed via `context_regex` so `setTimeout` no longer matches; only BitBox / U2FHID / hardware-wallet / signing call sites are considered.
+
+### Fixed
+
+- `regex_in_context` no longer required RE2 lookahead (`(?!\s*\*)`), which Go's regexp engine doesn't support.
+
 ## v0.1.0 — 2026-05-15
 
 First release. Establishes the architecture and ships an initial knowledge base of 30 documented BitBox02 firmware constraints.
@@ -51,3 +74,4 @@ First release. Establishes the architecture and ships an initial knowledge base 
 - Vendor-firmware SHA256s for v9.24.0–v9.26.1 were transcribed from the BitBoxSwiss releases page; a CI download surfaces an explicit hash-mismatch error if upstream rebuilds an artifact, rather than silently substituting tampered content.
 
 [v0.1.0]: https://github.com/joshuakrueger-dfx/bitbox-testkit/releases/tag/v0.1.0
+[v0.2.0]: https://github.com/joshuakrueger-dfx/bitbox-testkit/releases/tag/v0.2.0

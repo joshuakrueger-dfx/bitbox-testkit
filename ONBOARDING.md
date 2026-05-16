@@ -43,7 +43,7 @@ bitbox-audit --repo /path/to/your/wallet --format markdown
 
 You will see:
 
-- **Static detection bucket** — quirks the audit checked for source patterns (currently 4 of 30: `E1`, `M1`, `P2`, `A2`).
+- **Static detection bucket** — quirks the audit checked for source patterns (currently 11 of 31: `E1`, `E7`, `B1`, `B2`, `C2`, `M1`, `P2`, `A1`, `A2`, `A3`, `A4`).
 - **Not covered** — quirks with no static signature. These can only be caught by runtime tests you write using the testkit's Scenario fakes.
 
 Zero static findings is **not** the same as "your integration is safe." Most quirks need runtime tests. Continue to step 3.
@@ -90,15 +90,23 @@ go test -json ./... > go-test-results.json
 bitbox-audit --repo . --test-results go-test-results.json --format markdown
 ```
 
-### 4 · CI integration (GitHub Actions)
+### 4 · CI integration (one-line drop-in)
 
-Drop this workflow into your repo. Adapt `paths:` to match where BitBox code lives.
+The testkit ships a composite GitHub Action. Every DFX repo's BitBox-audit workflow collapses to a single `uses:` step.
+
+#### Option A · PR-on-open audit (recommended)
+
+`.github/workflows/bitbox-audit.yml`:
 
 ```yaml
 name: bitbox-audit
 on:
   pull_request:
-    paths: ['src/**', 'test/**']
+    paths:
+      - 'src/**'
+      - 'test/**'
+      - 'package.json'
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -109,27 +117,33 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
-        with: { go-version: '1.24' }
-      - uses: actions/setup-node@v4
-        with: { node-version: '20', cache: 'npm' }
-      - run: npm ci --no-audit
-      - name: install audit CLI
-        run: |
-          go install github.com/joshuakrueger-dfx/bitbox-testkit/go/cmd/bitbox-audit@main
-      - name: run jest with json output
-        run: |
-          npx jest --json --outputFile=jest.json \
-            --testPathPattern='bitbox.*\\.test\\.ts' || true
-      - name: run audit
-        run: |
-          bitbox-audit --repo . --test-results jest.json \
-            --format markdown --output report.md
-      - uses: marocchino/sticky-pull-request-comment@v2
-        with:
-          header: bitbox-audit
-          path: report.md
+      - uses: joshuakrueger-dfx/bitbox-testkit/.github/actions/bitbox-audit@v0.2.0
+        # Optional inputs:
+        # with:
+        #   firmware: '9.23.0'           # narrow quirks to a fw range
+        #   jest-extra-args: '--selectProjects unit'
+        #   fail-on-findings: 'true'     # block PRs with criticals
+        #   testkit-ref: main            # track bleeding edge instead of v0.2.0
 ```
+
+That single `uses:` step does: Go + Node setup, dependency install, Jest run, audit CLI install + run, sticky PR comment, artifact upload. No copy-pasted YAML to drift.
+
+#### Option B · Slash-command "on-demand audit"
+
+Drop `.github/workflows/bitbox-audit-slash.yml` (from the testkit's [`workflow-templates`](.github/workflow-templates/)) and any maintainer can comment `/bitbox-audit` on a PR to re-run the audit. Supports modifiers:
+
+```
+/bitbox-audit                    # defaults
+/bitbox-audit firmware=9.23.0    # narrow to fw
+/bitbox-audit fail               # block PR on findings
+/bitbox-audit ref=main           # use bleeding-edge testkit
+```
+
+Authorization gates on `author_association ∈ {OWNER, MEMBER, COLLABORATOR}` to prevent drive-by triggers.
+
+#### Both options share the same composite action
+
+So a regression in audit logic ships once via a testkit tag bump; consumer workflows don't need editing.
 
 A working example lives in [`dfx-wallet`'s PR #153](https://github.com/DFXswiss/dfx-wallet/pull/153).
 
@@ -239,16 +253,16 @@ For full API documentation per layer (fake builders, scenario factories, guard h
 
 ## Reference: quirks by category
 
-The 30 documented quirks. Run `bitbox-audit --format json | jq '.findings[].quirk_id'` against your repo for the subset relevant to you.
+The 31 documented quirks. Run `bitbox-audit --format json | jq '.findings[].quirk_id'` against your repo for the subset relevant to you.
 
 | Category | Count | Severity-mix |
 | -------- | ----: | ------------ |
 | ETH | 10 | 3 critical · 5 warning · 2 hint |
-| BTC | 7 | 3 critical · 3 warning · 1 hint |
+| BTC | 7 | 3 critical · 4 warning · 0 hint |
 | Cardano | 4 | 3 critical · 0 warning · 1 hint |
 | Mnemonic | 3 | 0 critical · 1 warning · 2 hint |
 | Protocol | 3 | 2 critical · 0 warning · 1 hint |
-| App | 3 | 2 critical · 1 warning · 0 hint |
+| App | 4 | 3 critical · 1 warning · 0 hint |
 
 Critical quirks are silent-corruption / silent-crash class. Warnings are user-visible but recoverable. Hints are documentation reminders.
 
