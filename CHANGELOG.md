@@ -2,6 +2,14 @@
 
 All notable changes to bitbox-testkit. The project uses semantic versioning starting from v0.1.0.
 
+## v0.3.1 — 2026-05-16
+
+Patch: refresh SHA-256 pins for the three most-recent simulator binaries (v9.24.0, v9.25.0, v9.26.1) after Shift Crypto reproducibly rebuilt the upstream artefacts. Behaviour is unchanged — the rebuild only altered build-metadata (timestamps, paths). The five older versions (v9.19.0–v9.23.0) still match their original pins.
+
+Caught by the first CI run of `bitbox-simulator-check` against `bitbox-api@0.12.0` on PR #153 — exactly the supply-chain-alarm mode the script was designed for. No user action required beyond bumping the testkit ref in consumer workflows from v0.3.0 → v0.3.1.
+
+[v0.3.1]: https://github.com/joshuakrueger-dfx/bitbox-testkit/releases/tag/v0.3.1
+
 ## v0.3.0 — 2026-05-16
 
 End-to-end against real firmware: a new CLI launches the official BitBox02 simulator binary and runs the testkit's curated baseline scenarios — pair, deviceInfo, get-address (mainnet + Polygon multi-byte v), sign-message (small + 1024-byte boundary), sign-EIP1559 — against the actual firmware logic. Replaces mock-only test coverage with real-firmware validation for every consumer.
