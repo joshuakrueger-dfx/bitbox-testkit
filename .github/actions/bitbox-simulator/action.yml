@@ -98,8 +98,19 @@ runs:
         fi
 
     - name: Comment on PR
-      if: inputs.comment-on-pr == 'true' && github.event_name == 'pull_request'
+      # Skip on fork PRs — GitHub does NOT issue a write-capable token
+      # for workflows triggered by a fork's pull_request, so the comment
+      # step would fail with "Resource not accessible by integration"
+      # and turn an otherwise-clean run red. The report is still
+      # uploaded as an artefact so reviewers can fetch it from the
+      # Actions UI; the slash workflow (triggered by issue_comment
+      # from a maintainer) is the canonical posting path.
+      if: >
+        inputs.comment-on-pr == 'true' &&
+        github.event_name == 'pull_request' &&
+        github.event.pull_request.head.repo.full_name == github.repository
       uses: marocchino/sticky-pull-request-comment@v2
+      continue-on-error: true
       with:
         header: bitbox-simulator
         path: ${{ steps.run.outputs.report-path }}
