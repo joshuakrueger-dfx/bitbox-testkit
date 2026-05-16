@@ -1,0 +1,7 @@
+{
+  "name": "BitBox audit (slash command)",
+  "description": "Comment /bitbox-audit on any PR to run the BitBox quirk scanner on demand. Supports firmware=, ref=, and 'fail' modifiers.",
+  "iconName": "shield-check",
+  "categories": ["Security", "Code quality"],
+  "filePatterns": ["**/*.ts", "**/*.tsx", "**/*.go", "**/*.dart", "src/features/hardware-wallet/**", "modules/bitbox-hid/**"]
+}

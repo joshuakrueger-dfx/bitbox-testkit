@@ -1,0 +1,7 @@
+{
+  "name": "BitBox audit",
+  "description": "Static + dynamic detection of known BitBox02 firmware-quirk regressions. Posts a sticky PR comment with coverage breakdown.",
+  "iconName": "shield-lock",
+  "categories": ["Security", "Code quality"],
+  "filePatterns": ["**/*.ts", "**/*.tsx", "**/*.go", "**/*.dart", "src/features/hardware-wallet/**", "modules/bitbox-hid/**"]
+}

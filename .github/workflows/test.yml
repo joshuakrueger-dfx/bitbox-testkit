@@ -77,3 +77,45 @@ jobs:
       - run: npm ci
       - run: npm run lint --if-present
       - run: npm test
+
+  action-yaml-lint:
+    name: composite action YAML lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: parse every workflow + action YAML
+        run: |
+          python3 - <<'PY'
+          import glob, sys, yaml
+          paths = sorted(set(
+            glob.glob('.github/**/*.yml', recursive=True) +
+            glob.glob('.github/**/*.yaml', recursive=True)
+          ))
+          bad = []
+          for p in paths:
+            try:
+              yaml.safe_load(open(p))
+              print(f'ok  {p}')
+            except Exception as e:
+              bad.append((p, e))
+              print(f'BAD {p}: {e}')
+          if bad:
+            sys.exit(1)
+          PY
+
+  action-selftest:
+    name: composite action self-test (no consumer)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: run composite action against this repo
+        uses: ./.github/actions/bitbox-audit
+        with:
+          testkit-ref: ${{ github.sha }}
+          run-jest: 'false'
+          comment-on-pr: 'false'
+          wasm-hash-check: 'false'
+          # The testkit repo has no `src/` to scan; the audit should
+          # still exit cleanly (no findings, exit 0).
+          fail-on-findings: 'true'

@@ -1,0 +1,122 @@
+# Drop-in template — copy to .github/workflows/bitbox-audit-slash.yml
+# in any DFX repo. Lets a maintainer comment "/bitbox-audit" on a PR to
+# trigger the same audit on demand (e.g. after a fresh push during
+# review). Posts a fresh sticky comment and uploads the report.
+#
+# Recognised variants:
+#   /bitbox-audit                       — defaults
+#   /bitbox-audit firmware=9.23.0       — narrow to that firmware
+#   /bitbox-audit fail                  — fail the check if findings exist
+#   /bitbox-audit ref=main              — use a specific testkit ref
+# Anything after `/bitbox-audit` is parsed as `key=value` pairs.
+
+name: bitbox-audit (slash)
+
+on:
+  issue_comment:
+    types: [created]
+
+permissions:
+  contents: read
+  pull-requests: write
+  issues: write
+
+concurrency:
+  group: bitbox-audit-slash-${{ github.event.issue.number }}
+  cancel-in-progress: true
+
+jobs:
+  guard:
+    if: >
+      github.event.issue.pull_request != null &&
+      startsWith(github.event.comment.body, '/bitbox-audit')
+    runs-on: ubuntu-latest
+    outputs:
+      authorized: ${{ steps.authz.outputs.authorized }}
+      ref: ${{ steps.parse.outputs.ref }}
+      sha: ${{ steps.parse.outputs.sha }}
+      firmware: ${{ steps.parse.outputs.firmware }}
+      fail-on-findings: ${{ steps.parse.outputs.fail_on_findings }}
+      testkit-ref: ${{ steps.parse.outputs.testkit_ref }}
+    steps:
+      - name: Authorization check
+        id: authz
+        uses: actions/github-script@v7
+        env:
+          ACTOR: ${{ github.event.comment.user.login }}
+          ASSOC: ${{ github.event.comment.author_association }}
+        with:
+          script: |
+            const allowed = ['OWNER', 'MEMBER', 'COLLABORATOR'];
+            const ok = allowed.includes(process.env.ASSOC);
+            core.setOutput('authorized', ok ? 'true' : 'false');
+            if (!ok) {
+              await github.rest.issues.createComment({
+                ...context.repo,
+                issue_number: context.issue.number,
+                body: `:no_entry_sign: \`@${process.env.ACTOR}\` is not authorized to run \`/bitbox-audit\`. (Needs OWNER / MEMBER / COLLABORATOR.)`,
+              });
+            }
+
+      - name: Parse command + resolve PR head SHA
+        id: parse
+        if: steps.authz.outputs.authorized == 'true'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const body = (context.payload.comment.body || '').trim();
+            const args = body.replace(/^\/bitbox-audit\s*/, '').split(/\s+/).filter(Boolean);
+            let firmware = '';
+            let failOnFindings = 'false';
+            let testkitRef = 'v0.2.0';
+            for (const tok of args) {
+              if (tok === 'fail') { failOnFindings = 'true'; continue; }
+              const [k, v] = tok.split('=');
+              if (!v) continue;
+              if (k === 'firmware') firmware = v;
+              else if (k === 'ref') testkitRef = v;
+            }
+            const { data: pr } = await github.rest.pulls.get({
+              ...context.repo,
+              pull_number: context.issue.number,
+            });
+            core.setOutput('ref', pr.head.ref);
+            core.setOutput('sha', pr.head.sha);
+            core.setOutput('firmware', firmware);
+            core.setOutput('fail_on_findings', failOnFindings);
+            core.setOutput('testkit_ref', testkitRef);
+            await github.rest.reactions.createForIssueComment({
+              ...context.repo,
+              comment_id: context.payload.comment.id,
+              content: 'rocket',
+            });
+
+  audit:
+    needs: guard
+    if: needs.guard.outputs.authorized == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.guard.outputs.sha }}
+
+      - name: Notify start
+        uses: actions/github-script@v7
+        with:
+          script: |
+            await github.rest.issues.createComment({
+              ...context.repo,
+              issue_number: context.issue.number,
+              body: `:robot: \`/bitbox-audit\` running on \`${context.payload.repository.full_name}@${process.env.SHA.slice(0,7)}\` (testkit \`${process.env.TESTKIT_REF}\`${process.env.FIRMWARE ? `, firmware ${process.env.FIRMWARE}` : ''}). Sticky comment will follow.`,
+            });
+        env:
+          SHA: ${{ needs.guard.outputs.sha }}
+          TESTKIT_REF: ${{ needs.guard.outputs.testkit-ref }}
+          FIRMWARE: ${{ needs.guard.outputs.firmware }}
+
+      - uses: joshuakrueger-dfx/bitbox-testkit/.github/actions/bitbox-audit@v0.2.0
+        with:
+          testkit-ref: ${{ needs.guard.outputs.testkit-ref }}
+          firmware: ${{ needs.guard.outputs.firmware }}
+          fail-on-findings: ${{ needs.guard.outputs.fail-on-findings }}

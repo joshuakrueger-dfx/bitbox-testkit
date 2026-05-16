@@ -1,0 +1,207 @@
+name: bitbox-audit
+description: >
+  Scan a repository for known BitBox02 firmware-quirk regressions and post a
+  sticky PR comment with the coverage report. One-line drop-in for any
+  DFX repo: add a workflow that calls this action. Optional Jest --json
+  output is folded into the runtime-coverage bucket; supply-chain check
+  for the bundled bitbox-api WASM runs first.
+
+inputs:
+  testkit-ref:
+    description: >
+      Git ref of joshuakrueger-dfx/bitbox-testkit to install. Pin to a
+      tag (v0.2.0) for reproducibility; use 'main' during testkit
+      development to track the bleeding edge.
+    required: false
+    default: v0.2.0
+  firmware:
+    description: >
+      Optional firmware version (e.g. 9.23.0) to narrow the quirk set to
+      ones applying to that version. Empty = all quirks.
+    required: false
+    default: ''
+  test-results:
+    description: >
+      Path to a Jest --json or `go test -json` results file. When set,
+      tests that reference a quirk ID by name are folded into the
+      dynamic-coverage bucket of the report. Empty = static-only.
+    required: false
+    default: ''
+  run-jest:
+    description: >
+      'true' to run `npx jest --json --outputFile=jest-bitbox.json` with
+      `--testPathPattern bitbox` automatically. Implies test-results.
+    required: false
+    default: 'true'
+  jest-pattern:
+    description: Test path pattern to filter Jest to.
+    required: false
+    default: 'bitbox.*\.test\.tsx?$'
+  jest-extra-args:
+    description: >
+      Extra args appended to the `npx jest` invocation, e.g.
+      "--selectProjects unit" if the repo uses Jest projects. Empty by
+      default.
+    required: false
+    default: ''
+  comment-on-pr:
+    description: >
+      'true' to post the markdown report as a sticky PR comment.
+      Requires pull-requests: write permission on the workflow.
+    required: false
+    default: 'true'
+  fail-on-findings:
+    description: >
+      'true' to exit non-zero (block the PR) when the audit produces any
+      critical findings. Default keeps the audit advisory.
+    required: false
+    default: 'false'
+  wasm-hash-check:
+    description: >
+      'true' to run scripts/setup-bitbox-wasm.sh --check if the asset
+      staging directory exists in the consumer repo. Non-blocking when
+      the staging dir is absent (informational notice instead).
+    required: false
+    default: 'true'
+
+outputs:
+  report-path:
+    description: Path to the rendered Markdown report.
+    value: ${{ steps.audit.outputs.report-path }}
+  findings-json-path:
+    description: Path to the raw JSON findings.
+    value: ${{ steps.audit.outputs.findings-json-path }}
+  had-findings:
+    description: >
+      Set to 'true' if the audit produced one or more findings of any
+      severity, else 'false'.
+    value: ${{ steps.audit.outputs.had-findings }}
+
+runs:
+  using: composite
+  steps:
+    - name: bitbox-api WASM hash check
+      if: inputs.wasm-hash-check == 'true'
+      shell: bash
+      continue-on-error: true
+      run: |
+        if [ -f scripts/setup-bitbox-wasm.sh ] && [ -d assets/bitbox-bridge ]; then
+          bash scripts/setup-bitbox-wasm.sh --check
+        else
+          echo "::notice::WASM hash check skipped (no scripts/setup-bitbox-wasm.sh or no staged assets/bitbox-bridge/)."
+        fi
+
+    - name: Set up Go
+      uses: actions/setup-go@v5
+      with:
+        go-version: '1.24'
+        cache: false
+
+    - name: Set up Node
+      if: inputs.run-jest == 'true'
+      uses: actions/setup-node@v4
+      with:
+        node-version: '20'
+
+    - name: Install Node dependencies (permissive)
+      if: inputs.run-jest == 'true'
+      id: deps
+      shell: bash
+      continue-on-error: true
+      run: |
+        npm install --no-audit --no-fund --legacy-peer-deps --ignore-scripts \
+          || echo "::warning::npm install failed; running static-only audit."
+
+    - name: Install bitbox-audit CLI
+      shell: bash
+      env:
+        GOPROXY: 'direct'
+        GOSUMDB: 'off'
+      run: |
+        go install "github.com/joshuakrueger-dfx/bitbox-testkit/go/cmd/bitbox-audit@${{ inputs.testkit-ref }}"
+        go install "github.com/joshuakrueger-dfx/bitbox-testkit/go/cmd/bitbox-audit-explain@${{ inputs.testkit-ref }}"
+
+    - name: Run BitBox-specific Jest tests
+      if: inputs.run-jest == 'true' && steps.deps.outcome == 'success'
+      shell: bash
+      continue-on-error: true
+      run: |
+        # shellcheck disable=SC2086  # extra-args is intentionally word-split.
+        npx jest --json \
+          --outputFile=jest-bitbox.json \
+          --testPathPattern='${{ inputs.jest-pattern }}' \
+          ${{ inputs.jest-extra-args }} \
+          || echo "::warning::Jest run failed; audit will use static-only coverage."
+
+    - name: Run audit
+      id: audit
+      shell: bash
+      env:
+        FAIL_ON_FINDINGS: ${{ inputs.fail-on-findings }}
+      run: |
+        set -o pipefail
+        tr_args=()
+        if [ -n "${{ inputs.test-results }}" ] && [ -f "${{ inputs.test-results }}" ]; then
+          tr_args=(--test-results "${{ inputs.test-results }}")
+        elif [ -f jest-bitbox.json ]; then
+          tr_args=(--test-results jest-bitbox.json)
+        fi
+        fw_args=()
+        if [ -n "${{ inputs.firmware }}" ]; then
+          fw_args=(--firmware "${{ inputs.firmware }}")
+        fi
+
+        rc=0
+        bitbox-audit \
+          --repo . \
+          "${tr_args[@]}" \
+          "${fw_args[@]}" \
+          --format json \
+          --output bitbox-findings.json \
+          || rc=$?
+        bitbox-audit \
+          --repo . \
+          "${tr_args[@]}" \
+          "${fw_args[@]}" \
+          --format markdown \
+          --output bitbox-report.md \
+          || true
+
+        if [ "$rc" -ne 0 ] && [ "$rc" -ne 2 ]; then
+          echo "::error::bitbox-audit failed with exit code $rc"
+          exit "$rc"
+        fi
+
+        echo "report-path=bitbox-report.md" >> "$GITHUB_OUTPUT"
+        echo "findings-json-path=bitbox-findings.json" >> "$GITHUB_OUTPUT"
+        if [ "$rc" -eq 2 ]; then
+          echo "had-findings=true" >> "$GITHUB_OUTPUT"
+        else
+          echo "had-findings=false" >> "$GITHUB_OUTPUT"
+        fi
+
+        jq '.summary, .coverage' bitbox-findings.json
+
+        if [ "$rc" -eq 2 ] && [ "$FAIL_ON_FINDINGS" = "true" ]; then
+          echo "::error::Audit found issues and fail-on-findings is enabled."
+          exit 1
+        fi
+
+    - name: Comment on PR
+      if: inputs.comment-on-pr == 'true' && github.event_name == 'pull_request'
+      uses: marocchino/sticky-pull-request-comment@v2
+      with:
+        header: bitbox-audit
+        path: ${{ steps.audit.outputs.report-path }}
+
+    - name: Upload audit artifacts
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: bitbox-audit
+        path: |
+          bitbox-findings.json
+          bitbox-report.md
+          jest-bitbox.json
+        if-no-files-found: ignore
+        retention-days: 14
