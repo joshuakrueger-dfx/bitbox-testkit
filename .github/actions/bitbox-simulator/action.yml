@@ -16,7 +16,7 @@ inputs:
       controls the action.yml itself. Mismatched refs leave the CLI
       running with stale embedded SHA pins — keep these in sync.
     required: false
-    default: v0.4.0
+    default: v0.4.2
   comment-on-pr:
     description: >
       'true' to post the markdown report as a sticky PR comment.
