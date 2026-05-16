@@ -10,10 +10,13 @@ inputs:
   testkit-ref:
     description: >
       Git ref of joshuakrueger-dfx/bitbox-testkit to install. Pin to a
-      tag (v0.3.0) for reproducibility; use 'main' to track the
-      bleeding-edge scenarios.
+      tag (v0.3.4) for reproducibility; use 'main' to track the
+      bleeding-edge scenarios. NOTE: this controls which CLI version
+      gets `go install`-ed; the @vX.Y.Z on the `uses:` line above only
+      controls the action.yml itself. Mismatched refs leave the CLI
+      running with stale embedded SHA pins — keep these in sync.
     required: false
-    default: v0.3.0
+    default: v0.3.4
   comment-on-pr:
     description: >
       'true' to post the markdown report as a sticky PR comment.
