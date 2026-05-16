@@ -1,7 +1,9 @@
 package main
 
 import (
+	"bytes"
 	"os"
+	"strings"
 
 	"github.com/joshuakrueger-dfx/bitbox-testkit/go/bitbox/quirks"
 )
@@ -10,8 +12,17 @@ import (
 // keeps a stable shape independent of internal type moves.
 type Finding = quirks.Finding
 
+// auditSkipLineMarker is the inline-comment string consumers add to a
+// source line (or the line directly above the offending tokens) to
+// silence a per-line false positive. Use sparingly — prefer
+// audit-skip-file for whole-file SDK boundaries.
+const auditSkipLineMarker = "audit-skip-line"
+
 // scan walks every file once, asks quirks.ScanFile to apply each
-// applicable rule, and aggregates findings.
+// applicable rule, and aggregates findings. Findings whose source
+// line (or the line immediately above) contains the audit-skip-line
+// marker are dropped so doc-comments demonstrating an anti-pattern
+// don't get flagged as real code.
 func scan(root string, files []string, applicable []quirks.Quirk) []Finding {
 	var out []Finding
 	for _, path := range files {
@@ -20,9 +31,38 @@ func scan(root string, files []string, applicable []quirks.Quirk) []Finding {
 			continue
 		}
 		rel := relative(root, path)
-		out = append(out, quirks.ScanFile(rel, content, applicable)...)
+		raw := quirks.ScanFile(rel, content, applicable)
+		if len(raw) == 0 {
+			continue
+		}
+		lines := bytes.Split(content, []byte("\n"))
+		for _, f := range raw {
+			if isLineSuppressed(lines, f.Line) {
+				continue
+			}
+			out = append(out, f)
+		}
 	}
 	return out
+}
+
+// isLineSuppressed reports whether the audit-skip-line marker appears
+// on the finding's own line OR on the immediately-preceding line. The
+// 1-line lookback supports the natural "comment on the line above"
+// pattern many editors and linters use.
+func isLineSuppressed(lines [][]byte, line int) bool {
+	if line <= 0 || line > len(lines) {
+		return false
+	}
+	// 1-based to 0-based.
+	idx := line - 1
+	if strings.Contains(string(lines[idx]), auditSkipLineMarker) {
+		return true
+	}
+	if idx > 0 && strings.Contains(string(lines[idx-1]), auditSkipLineMarker) {
+		return true
+	}
+	return false
 }
 
 func relative(root, path string) string {

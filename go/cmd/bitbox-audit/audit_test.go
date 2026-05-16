@@ -299,3 +299,41 @@ func TestReportSummary(t *testing.T) {
 		t.Fatalf("summary off: %+v", s)
 	}
 }
+
+func TestScanRespectsAuditSkipLineMarkerSameLine(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, dir, "demo.ts", `import { ethAddress } from 'bitbox-api';
+// docs: callers used to pass displayOnDevice: false; audit-skip-line
+const placeholder = true;
+`)
+	files, _ := enumerateSources(dir)
+	got := scan(dir, files, []quirks.Quirk{quirkByID(t, "A4")})
+	if len(got) != 0 {
+		t.Fatalf("expected 0 findings on same-line skip, got %d: %+v", len(got), got)
+	}
+}
+
+func TestScanRespectsAuditSkipLineMarkerLineAbove(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, dir, "demo.ts", `import { ethAddress } from 'bitbox-api';
+// audit-skip-line
+const placeholder = "displayOnDevice: false is no longer valid";
+`)
+	files, _ := enumerateSources(dir)
+	got := scan(dir, files, []quirks.Quirk{quirkByID(t, "A4")})
+	if len(got) != 0 {
+		t.Fatalf("expected 0 findings on line-above skip, got %d: %+v", len(got), got)
+	}
+}
+
+func TestScanStillFlagsWithoutSkipMarker(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, dir, "demo.ts", `import { ethAddress } from 'bitbox-api';
+ethAddress({ displayOnDevice: false });
+`)
+	files, _ := enumerateSources(dir)
+	got := scan(dir, files, []quirks.Quirk{quirkByID(t, "A4")})
+	if len(got) != 1 {
+		t.Fatalf("expected 1 A4 finding without skip marker, got %d: %+v", len(got), got)
+	}
+}
